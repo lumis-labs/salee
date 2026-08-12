@@ -1,0 +1,17 @@
+services:
+  revenue-agent:
+    build: .
+    env_file: .env
+    environment:
+      PORT: "8080"
+      RUN_WORKER: "1"
+      DATABASE_PATH: /app/data/revenue_agent.sqlite3
+    ports:
+      - "8080:8080"
+    volumes:
+      - revenue_agent_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  revenue_agent_data:
+

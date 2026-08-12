@@ -1,0 +1,4 @@
+address,channel,consent
+customer@example.com,email,opted_in
++15551234567,sms,opted_in
+
