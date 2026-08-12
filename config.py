@@ -29,6 +29,7 @@ class Settings:
     openrouter_app_name: str
     agent_name: str
     agent_full_name: str
+    dashboard_password: str
     agentmail_api_key: str
     agentmail_inbox: str
     twilio_account_sid: str
@@ -87,6 +88,7 @@ class Settings:
             openrouter_app_name=s("OPENROUTER_APP_NAME", "Revenue Agent"),
             agent_name=s("AGENT_NAME", "Salee"),
             agent_full_name=s("AGENT_FULL_NAME", "Salee Arman"),
+            dashboard_password=s("DASHBOARD_PASSWORD"),
             agentmail_api_key=s("AGENTMAIL_API_KEY"),
             agentmail_inbox=s("AGENTMAIL_INBOX"),
             twilio_account_sid=s("TWILIO_ACCOUNT_SID"),

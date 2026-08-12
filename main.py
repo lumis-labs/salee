@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from config import load_settings
+from dashboard import COOKIE_NAME, SESSION_SECONDS, dashboard_page, is_authenticated, login_page, session_cookie, snapshot
 from store import build_store
 from worker import RevenueWorker
 from providers import ProviderError, StripePayments
@@ -23,26 +24,52 @@ class Handler(BaseHTTPRequestHandler):
     worker: RevenueWorker
     settings = None
 
-    def _send(self, status: int, payload: dict) -> None:
+    def _send(self, status: int, payload: dict, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_html(self, status: int, body: str) -> None:
+    def _send_html(self, status: int, body: str, headers: dict[str, str] | None = None) -> None:
         raw = body.encode()
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(raw)
+
+    def _redirect(self, location: str, headers: dict[str, str] | None = None) -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+
+    def _dashboard_auth(self) -> bool:
+        return is_authenticated(self.settings, self.headers.get("Cookie", ""))
 
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
         if parsed.path == "/":
             self._send_html(200, self.worker.growth.landing_page(self.worker.checkout_url))
+        elif parsed.path == "/dashboard":
+            if not self._dashboard_auth():
+                self._send_html(200, login_page("Dashboard password is not configured yet.") if not self.settings.dashboard_password else login_page())
+            else:
+                self._send_html(200, dashboard_page(), {"Cache-Control": "no-store"})
+        elif parsed.path == "/dashboard/data":
+            if not self._dashboard_auth():
+                self._send(401, {"error": "dashboard authentication required"}, {"Cache-Control": "no-store"})
+            else:
+                self._send(200, snapshot(self.worker), {"Cache-Control": "no-store"})
+        elif parsed.path == "/dashboard/logout":
+            self._redirect("/dashboard", {"Set-Cookie": f"{COOKIE_NAME}=; Max-Age=0; HttpOnly; Path=/dashboard; SameSite=Strict"})
         elif parsed.path == "/blog":
             posts = self.worker.store.artifacts("blog", limit=20)
             links = "".join(f'<li><a href="/blog/{html.escape(row["slug"], quote=True)}">{html.escape(row["title"])}</a></li>' for row in posts)
@@ -95,6 +122,17 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length)
         parsed = urlsplit(self.path)
+        if parsed.path == "/dashboard/login":
+            params = parse_qs(raw.decode(errors="replace"), keep_blank_values=True)
+            password = params.get("password", [""])[0]
+            configured = self.settings.dashboard_password
+            if configured and hmac.compare_digest(password, configured):
+                secure = "; Secure" if self.settings.public_base_url.startswith("https://") else ""
+                cookie = f"{COOKIE_NAME}={session_cookie(self.settings)}; Max-Age={SESSION_SECONDS}; HttpOnly; Path=/dashboard; SameSite=Strict{secure}"
+                self._redirect("/dashboard", {"Set-Cookie": cookie, "Cache-Control": "no-store"})
+            else:
+                self._send_html(401, login_page("Incorrect dashboard password."), {"Cache-Control": "no-store"})
+            return
         if parsed.path == "/webhooks/stripe":
             try:
                 event = StripePayments.verify_webhook(raw, self.headers.get("Stripe-Signature", ""), self.settings.stripe_webhook_secret)

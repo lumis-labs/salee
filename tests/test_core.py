@@ -13,6 +13,7 @@ from store import Store, VercelStore
 from worker import RevenueWorker
 from providers import StripePayments
 from growth import _parse_proposal
+from dashboard import is_authenticated, session_cookie
 
 
 class CoreTests(unittest.TestCase):
@@ -119,6 +120,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(reconstructed["stripe_session_id"], "cs_live_1")
         self.assertTrue(second.save_intake(token, {"business": "Acme", "goal": "more leads"}))
         second.close()
+
+    def test_dashboard_session_is_signed_and_expires(self):
+        settings = replace(self.settings, dashboard_password="dashboard-test-password")
+        cookie = session_cookie(settings)
+        self.assertTrue(is_authenticated(settings, f"salee_dashboard_session={cookie}"))
+        self.assertFalse(is_authenticated(settings, "salee_dashboard_session=not-valid"))
 
     def test_paid_order_gets_intake_and_automated_report(self):
         worker = RevenueWorker(self.settings, self.store)
