@@ -12,6 +12,7 @@ from typing import Any
 
 from config import Settings
 from growth import GrowthEngine
+from prospecting import ProspectingEngine
 from policy import can_send, note_inbound
 from providers import AgentMail, InboundMessage, OpenRouter, ProviderError, StripePayments, Twilio
 from quality_control import validate_draft
@@ -45,6 +46,7 @@ class RevenueWorker:
         self.stripe = StripePayments(settings)
         self.llm_calls = 0
         self.growth = GrowthEngine(settings, self.store, self._complete)
+        self.prospecting = ProspectingEngine(settings, self.store)
 
     @property
     def checkout_url(self) -> str:
@@ -355,8 +357,9 @@ class RevenueWorker:
         processed += self.process_orders()
         processed += self.run_followups()
         growth_result = self.growth.run()
+        prospecting_result = self.prospecting.run()
         self.store.audit("cycle_complete", {"processed": processed, "status": self.store.status()})
-        return {"processed": processed, "growth": growth_result, **self.store.status()}
+        return {"processed": processed, "growth": growth_result, "prospecting": prospecting_result, **self.store.status()}
 
     def run_forever(self) -> None:
         LOG.info("Revenue worker started; interval=%ss", self.settings.poll_interval_seconds)

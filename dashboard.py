@@ -91,6 +91,7 @@ def snapshot(worker: Any) -> dict[str, Any]:
             item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
         except json.JSONDecodeError:
             item["metadata"] = {"raw": item.pop("metadata_json", "")}
+    prospects = _rows(store, "SELECT source,external_id,url,title,summary,author,match_score,outreach_draft,status,created_at,updated_at FROM prospects ORDER BY match_score DESC, updated_at DESC LIMIT 20")
 
     pending = int(status.get("pending_decisions", 0))
     queued = int(status.get("queued_inbound", 0))
@@ -98,6 +99,8 @@ def snapshot(worker: Any) -> dict[str, Any]:
         thinking = f"Processing {queued} queued inbound event(s) through policy, quality control, and the smallest appropriate specialist."
     elif pending:
         thinking = f"Holding {pending} decision(s) for review instead of sending an uncertain or unapproved action."
+    elif int(status.get("prospect_drafts", 0)):
+        thinking = f"Found {status['prospect_drafts']} public opportunities and prepared contextual outreach drafts while the growth loop runs."
     elif worker.revenue_ready:
         thinking = "Monitoring inbound demand, consent, checkout events, fulfillment, and the next bounded growth cycle."
     else:
@@ -130,6 +133,7 @@ def snapshot(worker: Any) -> dict[str, Any]:
         "orders": orders,
         "experiments": experiments,
         "artifacts": artifacts,
+        "prospects": prospects,
     }
 
 
@@ -143,7 +147,7 @@ def login_page(error: str = "") -> str:
 def dashboard_page() -> str:
     return """<!doctype html>
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="900"><title>Salee Arman · Dashboard</title>
-<style>""" + _styles() + """</style></head><body><div class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">S</span><span>Salee Arman</span></div><div class="top-actions"><span id="updated" class="muted">Loading snapshot…</span><a href="/dashboard/logout">Log out</a></div></header><main class="content"><section class="hero"><div><p class="eyebrow">Private operations view</p><h1>System overview</h1><p class="muted">Observable decisions, safeguards, customer activity, and growth work. This shows recorded reasoning signals and audit trails, not private hidden chain-of-thought.</p></div><div id="posture" class="posture">Loading…</div></section><section id="metrics" class="metrics"></section><section class="grid two"><article class="panel feature"><div class="panel-head"><div><h2>Thinking now</h2><p class="muted">Current bounded operating posture</p></div><span id="mode" class="status-dot"></span></div><p id="thinking" class="thinking">Loading…</p><div id="system-details" class="detail-grid"></div></article><article class="panel"><div class="panel-head"><div><h2>Choices considered</h2><p class="muted">Decision records and why they were held</p></div></div><div id="decisions" class="stack"></div></article></section><section class="grid two"><article class="panel"><div class="panel-head"><div><h2>Decision trace</h2><p class="muted">Latest auditable events</p></div></div><div id="audit" class="timeline"></div></article><article class="panel"><div class="panel-head"><div><h2>Recent activity</h2><p class="muted">Inbound and outbound messages</p></div></div><div id="messages" class="stack"></div></article></section><section class="grid two"><article class="panel"><div class="panel-head"><div><h2>Revenue pipeline</h2><p class="muted">Checkout, intake, and fulfillment</p></div></div><div id="orders" class="table-wrap"></div></article><article class="panel"><div class="panel-head"><div><h2>Growth loop</h2><p class="muted">Landing copy, SEO/GEO, and experiments</p></div></div><div id="growth" class="stack"></div></article></section></main></div>
+<style>""" + _styles() + """</style></head><body><div class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">S</span><span>Salee Arman</span></div><div class="top-actions"><span id="updated" class="muted">Loading snapshot…</span><a href="/dashboard/logout">Log out</a></div></header><main class="content"><section class="hero"><div><p class="eyebrow">Private operations view</p><h1>System overview</h1><p class="muted">Observable decisions, safeguards, customer activity, and growth work. This shows recorded reasoning signals and audit trails, not private hidden chain-of-thought.</p></div><div id="posture" class="posture">Loading…</div></section><section id="metrics" class="metrics"></section><section class="grid two"><article class="panel feature"><div class="panel-head"><div><h2>Thinking now</h2><p class="muted">Current bounded operating posture</p></div><span id="mode" class="status-dot"></span></div><p id="thinking" class="thinking">Loading…</p><div id="system-details" class="detail-grid"></div></article><article class="panel"><div class="panel-head"><div><h2>Choices considered</h2><p class="muted">Decision records and why they were held</p></div></div><div id="decisions" class="stack"></div></article></section><section class="grid two"><article class="panel"><div class="panel-head"><div><h2>Decision trace</h2><p class="muted">Latest auditable events</p></div></div><div id="audit" class="timeline"></div></article><article class="panel"><div class="panel-head"><div><h2>Recent activity</h2><p class="muted">Inbound and outbound messages</p></div></div><div id="messages" class="stack"></div></article></section><section class="grid two"><article class="panel"><div class="panel-head"><div><h2>Revenue pipeline</h2><p class="muted">Checkout, intake, and fulfillment</p></div></div><div id="orders" class="table-wrap"></div></article><article class="panel"><div class="panel-head"><div><h2>Growth loop</h2><p class="muted">Landing copy, SEO/GEO, and experiments</p></div></div><div id="growth" class="stack"></div></article></section><section class="grid"><article class="panel"><div class="panel-head"><div><h2>Public prospecting queue</h2><p class="muted">Public conversations and contextual drafts</p></div></div><div id="prospects" class="stack"></div></article></section></main></div>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g, c => c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c.charCodeAt(0) === 34 ? "&quot;" : "&#39;");
@@ -156,19 +160,21 @@ function auditItem(item) { return `<div class="timeline-item"><span class="timel
 function messageItem(item) { return `<div class="activity"><div class="row"><strong>${esc(item.direction)} · ${esc(item.channel)}</strong><span class="muted">${esc(when(item.created_at))}</span></div><div class="muted">${esc(item.contact || "")}</div><p>${esc(item.body || "")}</p></div>`; }
 function orderTable(items) { if (!items.length) return `<p class="empty">No paid orders recorded in this instance.</p>`; return `<table><thead><tr><th>Customer</th><th>Status</th><th>Fulfillment</th><th>Updated</th></tr></thead><tbody>${items.map(x => `<tr><td>${esc(x.email)}</td><td>${esc(x.status)}</td><td>${esc(x.fulfillment_status)}</td><td>${esc(when(x.updated_at))}</td></tr>`).join("")}</tbody></table>`; }
 function growthItem(item) { const label = item.title || item.name; const detail = item.hypothesis || item.kind || item.status; return `<div class="activity"><div class="row"><strong>${esc(label)}</strong><span class="tag">${esc(item.status || "published")}</span></div><p>${esc(detail)}</p><div class="muted">${esc(when(item.updated_at || item.created_at))}</div></div>`; }
+function prospectItem(item) { return `<div class="activity"><div class="row"><strong>${esc(item.title)}</strong><span class="tag">${esc(item.source)} · ${esc(item.match_score)}%</span></div><div class="muted">${esc(item.author || "public author")} · ${esc(when(item.updated_at || item.created_at))}</div><a href="${esc(item.url)}" target="_blank" rel="noreferrer">${esc(item.url)}</a><p>${esc(item.summary || "No summary available.")}</p><pre>${esc(item.outreach_draft || "")}</pre></div>`; }
 async function load() {
   const response = await fetch('/dashboard/data', {credentials: 'same-origin', cache: 'no-store'});
   if (response.status === 401) { location.href = '/dashboard'; return; }
   const data = await response.json(); const s = data.system; const st = data.status;
   text($('updated'), `Updated ${when(data.generated_at)}`); text($('thinking'), data.thinking_now); text($('mode'), s.stripe_mode);
   $('posture').className = `posture ${s.revenue_ready ? 'good' : 'warn'}`; text($('posture'), s.revenue_ready ? 'Revenue-ready' : 'Revenue paused');
-  $('metrics').innerHTML = [metric('Messages', st.messages), metric('Pending decisions', st.pending_decisions, st.pending_decisions ? 'warn-text' : ''), metric('Paid orders', st.paid_orders, 'good-text'), metric('Fulfillment queue', st.pending_fulfillment), metric('Growth posts', st.published_growth_artifacts), metric('LLM calls / cycle', `${s.llm_calls_this_cycle} / ${s.max_llm_calls_per_cycle}`)].join('');
+  $('metrics').innerHTML = [metric('Messages', st.messages), metric('Pending decisions', st.pending_decisions, st.pending_decisions ? 'warn-text' : ''), metric('Paid orders', st.paid_orders, 'good-text'), metric('Fulfillment queue', st.pending_fulfillment), metric('Prospect drafts', st.prospect_drafts), metric('Growth posts', st.published_growth_artifacts), metric('LLM calls / cycle', `${s.llm_calls_this_cycle} / ${s.max_llm_calls_per_cycle}`)].join('');
   $('system-details').innerHTML = [['Stripe', s.stripe_mode], ['Poll interval', `${s.poll_interval_seconds}s`], ['Growth cadence', s.growth_enabled ? `every ${s.growth_interval_hours}h` : 'off'], ['Daily growth calls', s.growth_max_calls_per_day], ['Models', `${s.model_routing.worker} → ${s.model_routing.planner} → ${s.model_routing.qa}`], ['Checkout', st.checkout_link_ready ? 'ready' : 'missing'], ['Operational gaps', (s.missing_operational_config || []).join(', ') || 'none']].map(x => `<div><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
   $('decisions').innerHTML = data.decisions.length ? data.decisions.map(decisionCard).join('') : '<p class="empty">No decisions waiting for review.</p>';
   $('audit').innerHTML = data.audit.length ? data.audit.map(auditItem).join('') : '<p class="empty">No audit events yet.</p>';
   $('messages').innerHTML = data.messages.length ? data.messages.map(messageItem).join('') : '<p class="empty">No messages recorded.</p>';
   $('orders').innerHTML = orderTable(data.orders);
   $('growth').innerHTML = [...data.experiments, ...data.artifacts].length ? [...data.experiments, ...data.artifacts].map(growthItem).join('') : '<p class="empty">No growth artifacts yet.</p>';
+  $('prospects').innerHTML = data.prospects.length ? data.prospects.map(prospectItem).join('') : '<p class="empty">No public opportunities found yet. The next prospecting cycle will retry.</p>';
 }
 load().catch(error => { text($('thinking'), `Dashboard data unavailable: ${error.message}`); }); setInterval(load, 15000);
 </script></body></html>"""

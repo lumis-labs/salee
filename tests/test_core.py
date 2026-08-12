@@ -13,6 +13,7 @@ from store import Store, VercelStore
 from worker import RevenueWorker
 from providers import StripePayments
 from growth import _parse_proposal
+from prospecting import ProspectingEngine
 from dashboard import is_authenticated, session_cookie
 
 
@@ -167,6 +168,19 @@ class CoreTests(unittest.TestCase):
 
     def test_growth_parser_accepts_fenced_json(self):
         self.assertEqual(_parse_proposal("```json\n{\"headline\":\"x\"}\n```"), {"headline": "x"})
+
+    def test_prospecting_saves_scored_public_draft(self):
+        settings = replace(self.settings, prospecting_queries="AI workflow", public_base_url="https://salee.example")
+        engine = ProspectingEngine(settings, self.store)
+        engine._discover = lambda query: [{
+            "source": "test-source", "external_id": "1", "url": "https://example.com/post",
+            "title": "AI workflow automation", "summary": "A public discussion about an AI workflow.", "author": "public-user",
+        }]
+        result = engine.run()
+        self.assertEqual(result["saved"], 1)
+        prospect = self.store.prospects(1)[0]
+        self.assertEqual(prospect["status"], "draft")
+        self.assertIn("https://salee.example", prospect["outreach_draft"])
 
 
 if __name__ == "__main__":

@@ -61,6 +61,11 @@ class Settings:
     growth_enabled: bool
     growth_interval_hours: int
     growth_max_calls_per_day: int
+    prospecting_enabled: bool
+    prospecting_interval_minutes: int
+    prospecting_max_items: int
+    prospecting_queries: str
+    prospecting_source_urls: str
 
     @classmethod
     def from_root(cls, root: Path) -> "Settings":
@@ -124,6 +129,11 @@ class Settings:
             growth_enabled=s("GROWTH_ENABLED", "true").lower() in {"1", "true", "yes"},
             growth_interval_hours=max(1, i("GROWTH_INTERVAL_HOURS", 6)),
             growth_max_calls_per_day=max(1, i("GROWTH_MAX_CALLS_PER_DAY", 4)),
+            prospecting_enabled=s("PROSPECTING_ENABLED", "true").lower() in {"1", "true", "yes"},
+            prospecting_interval_minutes=max(10, i("PROSPECTING_INTERVAL_MINUTES", 30)),
+            prospecting_max_items=max(1, i("PROSPECTING_MAX_ITEMS", 20)),
+            prospecting_queries=s("PROSPECTING_QUERIES", "AI workflow automation|lead follow up automation|small business AI|sales process automation"),
+            prospecting_source_urls=s("PROSPECTING_SOURCE_URLS"),
         )
 
     @property

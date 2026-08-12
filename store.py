@@ -77,6 +77,15 @@ class Store:
               status TEXT NOT NULL DEFAULT 'proposed', created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS prospects (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              source TEXT NOT NULL, external_id TEXT NOT NULL,
+              url TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,
+              author TEXT, match_score INTEGER NOT NULL DEFAULT 0,
+              outreach_draft TEXT, status TEXT NOT NULL DEFAULT 'discovered',
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              UNIQUE(source, external_id)
+            );
             """
         )
         for column, definition in (
@@ -275,6 +284,19 @@ class Store:
         )
         self.db.commit()
 
+    def save_prospect(self, source: str, external_id: str, url: str, title: str, summary: str, author: str, match_score: int, outreach_draft: str) -> None:
+        now = utcnow()
+        self.db.execute(
+            """INSERT INTO prospects(source,external_id,url,title,summary,author,match_score,outreach_draft,status,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(source,external_id) DO UPDATE SET title=excluded.title,summary=excluded.summary,author=excluded.author,match_score=excluded.match_score,outreach_draft=excluded.outreach_draft,updated_at=excluded.updated_at""",
+            (source, external_id, url, title[:300], summary[:4000], author[:200], max(0, min(100, match_score)), outreach_draft[:4000], "draft", now, now),
+        )
+        self.db.commit()
+
+    def prospects(self, limit: int = 30) -> list[sqlite3.Row]:
+        return list(self.db.execute("SELECT * FROM prospects ORDER BY match_score DESC, updated_at DESC LIMIT ?", (limit,)))
+
     def status(self) -> dict[str, Any]:
         return {
             "messages": int(self.db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]),
@@ -285,6 +307,9 @@ class Store:
             "pending_fulfillment": int(self.db.execute("SELECT COUNT(*) FROM orders WHERE fulfillment_status='pending'").fetchone()[0]),
             "published_growth_artifacts": int(self.db.execute("SELECT COUNT(*) FROM growth_artifacts WHERE status='published'").fetchone()[0]),
             "proposed_experiments": int(self.db.execute("SELECT COUNT(*) FROM growth_experiments WHERE status='proposed'").fetchone()[0]),
+            "prospects_discovered": int(self.db.execute("SELECT COUNT(*) FROM prospects").fetchone()[0]),
+            "prospect_drafts": int(self.db.execute("SELECT COUNT(*) FROM prospects WHERE status='draft'").fetchone()[0]),
+            "prospecting_last_run": self.get_runtime("prospecting_last_run"),
             "last_audit": self.db.execute("SELECT created_at FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()[0]
             if self.db.execute("SELECT 1 FROM audit_log LIMIT 1").fetchone() else None,
         }
