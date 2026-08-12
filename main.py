@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_html(200, """<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Salee intake</title><style>body{font:16px system-ui;max-width:680px;margin:8vh auto;padding:24px}input,textarea{display:block;width:100%;margin:8px 0 18px;padding:10px;box-sizing:border-box}button{padding:12px 18px}</style><h1>Salee intake</h1><p>Answer briefly so we can prepare your AI workflow audit.</p><form method="post" action="/intake"><input type="hidden" name="token" value=""" + html.escape(token, quote=True) + """"><label>Business / website<input name="business" required></label><label>Current sales or follow-up process<textarea name="current_process"></textarea></label><label>Biggest growth goal<textarea name="goal" required></textarea></label><label>Top constraint<textarea name="constraint"></textarea></label><button>Submit intake</button></form>""")
         elif parsed.path == "/health":
-            status = self.worker.store.status()
+            status = self.worker.observed_status()
             status["checkout_link_ready"] = bool(self.worker.checkout_url)
             self._send(200, {"ok": True, "agent_name": self.settings.agent_name, "agent_full_name": self.settings.agent_full_name, "stripe_mode": self.worker.payment_mode, "revenue_ready": self.worker.revenue_ready, "missing_revenue_config": self.worker.missing_revenue_config, "missing_operational_config": self.settings.missing_operational_config, **status})
         elif parsed.path == "/metrics":

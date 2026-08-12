@@ -61,7 +61,7 @@ def _rows(store: Any, query: str, params: tuple[Any, ...] = ()) -> list[dict[str
 
 def snapshot(worker: Any) -> dict[str, Any]:
     store = worker.store
-    status = store.status()
+    status = worker.observed_status()
     status["checkout_link_ready"] = bool(worker.checkout_url)
     decisions = _rows(store, "SELECT id,kind,channel,contact,payload_json,status,created_at,resolved_at FROM decisions ORDER BY id DESC LIMIT 20")
     for item in decisions:
@@ -91,7 +91,14 @@ def snapshot(worker: Any) -> dict[str, Any]:
             item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
         except json.JSONDecodeError:
             item["metadata"] = {"raw": item.pop("metadata_json", "")}
-    prospects = _rows(store, "SELECT source,external_id,url,title,summary,author,match_score,outreach_draft,status,created_at,updated_at FROM prospects ORDER BY match_score DESC, updated_at DESC LIMIT 20")
+    if worker.shared_prospects.enabled:
+        try:
+            prospects = worker.shared_prospects.list(20)
+        except Exception as exc:
+            store.audit("shared_prospect_dashboard_error", {"error": str(exc)[:300]})
+            prospects = []
+    else:
+        prospects = _rows(store, "SELECT source,external_id,url,title,summary,author,match_score,outreach_draft,status,created_at,updated_at FROM prospects ORDER BY match_score DESC, updated_at DESC LIMIT 20")
 
     pending = int(status.get("pending_decisions", 0))
     queued = int(status.get("queued_inbound", 0))

@@ -66,6 +66,8 @@ class Settings:
     prospecting_max_items: int
     prospecting_queries: str
     prospecting_source_urls: str
+    supabase_data_api_url: str
+    supabase_secret_key: str
 
     @classmethod
     def from_root(cls, root: Path) -> "Settings":
@@ -134,6 +136,8 @@ class Settings:
             prospecting_max_items=max(1, i("PROSPECTING_MAX_ITEMS", 20)),
             prospecting_queries=s("PROSPECTING_QUERIES", "AI workflow automation|lead follow up automation|small business AI|sales process automation"),
             prospecting_source_urls=s("PROSPECTING_SOURCE_URLS"),
+            supabase_data_api_url=url("SUPABASE_DATA_API_URL"),
+            supabase_secret_key=s("SUPABASE_SECRET_KEY"),
         )
 
     @property

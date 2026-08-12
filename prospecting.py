@@ -13,6 +13,7 @@ from html import unescape
 from typing import Any
 
 from config import Settings
+from shared_prospects import SharedProspects
 from store import Store
 
 
@@ -43,9 +44,10 @@ def _draft(settings: Settings, title: str, summary: str, url: str) -> str:
 class ProspectingEngine:
     """Discover public conversations; never harvest private contact data."""
 
-    def __init__(self, settings: Settings, store: Store):
+    def __init__(self, settings: Settings, store: Store, shared: SharedProspects | None = None):
         self.settings = settings
         self.store = store
+        self.shared = shared or SharedProspects(settings)
 
     def due(self) -> bool:
         if not self.settings.prospecting_enabled:
@@ -134,14 +136,26 @@ class ProspectingEngine:
         for url in [item.strip() for item in self.settings.prospecting_source_urls.split(",") if item.strip()][:8]:
             rows.extend(self._fetch_public_source(url))
         saved = 0
+        shared_rows: list[dict[str, Any]] = []
+        sync_time = datetime.now(timezone.utc).isoformat()
         for item in rows:
             score = _score(f"{item['title']} {item['summary']}", queries)
             if score < 12 or not item.get("url"):
                 continue
             self.store.save_prospect(item["source"], item["external_id"], item["url"], item["title"], item["summary"], item.get("author", ""), score, _draft(self.settings, item["title"], item["summary"], item["url"]))
+            shared_rows.append({
+                "source": item["source"], "external_id": item["external_id"], "url": item["url"],
+                "title": item["title"], "summary": item["summary"], "author": item.get("author", ""),
+                "match_score": score, "outreach_draft": _draft(self.settings, item["title"], item["summary"], item["url"]), "status": "draft", "updated_at": sync_time,
+            })
             saved += 1
             if saved >= self.settings.prospecting_max_items:
                 break
+        if shared_rows:
+            try:
+                self.shared.upsert(shared_rows)
+            except Exception as exc:
+                self.store.audit("shared_prospect_sync_error", {"error": str(exc)[:300]})
         now = datetime.now(timezone.utc).isoformat()
         self.store.set_runtime("prospecting_last_run", now)
         self.store.audit("prospecting_complete", {"queries": queries, "discovered": len(rows), "saved": saved})

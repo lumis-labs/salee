@@ -16,6 +16,7 @@ from prospecting import ProspectingEngine
 from policy import can_send, note_inbound
 from providers import AgentMail, InboundMessage, OpenRouter, ProviderError, StripePayments, Twilio
 from quality_control import validate_draft
+from shared_prospects import SharedProspects
 from store import Store
 
 LOG = logging.getLogger("revenue_agent")
@@ -45,8 +46,18 @@ class RevenueWorker:
         self.twilio = Twilio(settings)
         self.stripe = StripePayments(settings)
         self.llm_calls = 0
+        self.shared_prospects = SharedProspects(settings)
         self.growth = GrowthEngine(settings, self.store, self._complete)
-        self.prospecting = ProspectingEngine(settings, self.store)
+        self.prospecting = ProspectingEngine(settings, self.store, self.shared_prospects)
+
+    def observed_status(self) -> dict[str, Any]:
+        status = self.store.status()
+        if self.shared_prospects.enabled:
+            try:
+                status.update(self.shared_prospects.status())
+            except Exception as exc:
+                self.store.audit("shared_prospect_status_error", {"error": str(exc)[:300]})
+        return status
 
     @property
     def checkout_url(self) -> str:
@@ -363,7 +374,7 @@ class RevenueWorker:
         growth_result = self.growth.run()
         prospecting_result = self.prospecting.run()
         self.store.audit("cycle_complete", {"processed": processed, "status": self.store.status()})
-        return {"processed": processed, "growth": growth_result, "prospecting": prospecting_result, **self.store.status()}
+        return {"processed": processed, "growth": growth_result, "prospecting": prospecting_result, **self.observed_status()}
 
     def run_forever(self) -> None:
         LOG.info("Revenue worker started; interval=%ss", self.settings.poll_interval_seconds)
