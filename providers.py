@@ -47,11 +47,11 @@ class OpenRouter:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    def complete(self, system: str, user: str, max_tokens: int = 500) -> str:
+    def complete(self, system: str, user: str, max_tokens: int = 500, role: str = "worker") -> str:
         if not self.settings.openrouter_api_key:
             raise ProviderError("OPENROUTER_API_KEY is not configured")
         payload = {
-            "model": self.settings.openrouter_model,
+            "model": self.settings.model_for(role),
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "max_tokens": max_tokens,
             "temperature": 0.3,

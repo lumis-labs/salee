@@ -25,6 +25,10 @@ class Settings:
     root: Path
     openrouter_api_key: str
     openrouter_model: str
+    openrouter_worker_model: str
+    openrouter_planner_model: str
+    openrouter_qa_model: str
+    openrouter_qa_enabled: bool
     openrouter_site_url: str
     openrouter_app_name: str
     agent_name: str
@@ -84,6 +88,10 @@ class Settings:
             root=root,
             openrouter_api_key=s("OPENROUTER_API_KEY"),
             openrouter_model=s("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+            openrouter_worker_model=s("OPENROUTER_WORKER_MODEL", s("OPENROUTER_FREE_MODEL", s("OPENROUTER_MODEL", "openai/gpt-4o-mini"))),
+            openrouter_planner_model=s("OPENROUTER_PLANNER_MODEL", s("OPENROUTER_MODEL", "openai/gpt-4o-mini")),
+            openrouter_qa_model=s("OPENROUTER_QA_MODEL", s("OPENROUTER_PLANNER_MODEL", s("OPENROUTER_MODEL", "openai/gpt-4o-mini"))),
+            openrouter_qa_enabled=s("GROWTH_QA_ENABLED", "true").lower() in {"1", "true", "yes"},
             openrouter_site_url=s("OPENROUTER_SITE_URL", "http://localhost:8080"),
             openrouter_app_name=s("OPENROUTER_APP_NAME", "Revenue Agent"),
             agent_name=s("AGENT_NAME", "Salee"),
@@ -150,6 +158,13 @@ class Settings:
         if key.startswith(("sk_live_", "rk_live_")):
             return "live"
         return "unknown" if key else "missing"
+
+    def model_for(self, role: str) -> str:
+        return {
+            "worker": self.openrouter_worker_model,
+            "planner": self.openrouter_planner_model,
+            "qa": self.openrouter_qa_model,
+        }.get(role, self.openrouter_worker_model)
 
 
 def load_settings(root: str | Path = ".") -> Settings:

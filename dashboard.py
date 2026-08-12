@@ -115,6 +115,8 @@ def snapshot(worker: Any) -> dict[str, Any]:
             "public_base_url": worker.settings.public_base_url,
             "llm_calls_this_cycle": worker.llm_calls,
             "max_llm_calls_per_cycle": worker.settings.max_llm_calls_per_cycle,
+            "model_routing": {"worker": worker.settings.openrouter_worker_model, "planner": worker.settings.openrouter_planner_model, "qa": worker.settings.openrouter_qa_model},
+            "growth_qa_enabled": worker.settings.openrouter_qa_enabled,
             "growth_enabled": worker.settings.growth_enabled,
             "growth_interval_hours": worker.settings.growth_interval_hours,
             "growth_max_calls_per_day": worker.settings.growth_max_calls_per_day,
@@ -161,7 +163,7 @@ async function load() {
   text($('updated'), `Updated ${when(data.generated_at)}`); text($('thinking'), data.thinking_now); text($('mode'), s.stripe_mode);
   $('posture').className = `posture ${s.revenue_ready ? 'good' : 'warn'}`; text($('posture'), s.revenue_ready ? 'Revenue-ready' : 'Revenue paused');
   $('metrics').innerHTML = [metric('Messages', st.messages), metric('Pending decisions', st.pending_decisions, st.pending_decisions ? 'warn-text' : ''), metric('Paid orders', st.paid_orders, 'good-text'), metric('Fulfillment queue', st.pending_fulfillment), metric('Growth posts', st.published_growth_artifacts), metric('LLM calls / cycle', `${s.llm_calls_this_cycle} / ${s.max_llm_calls_per_cycle}`)].join('');
-  $('system-details').innerHTML = [['Stripe', s.stripe_mode], ['Poll interval', `${s.poll_interval_seconds}s`], ['Growth cadence', s.growth_enabled ? `every ${s.growth_interval_hours}h` : 'off'], ['Daily growth calls', s.growth_max_calls_per_day], ['Checkout', st.checkout_link_ready ? 'ready' : 'missing'], ['Operational gaps', (s.missing_operational_config || []).join(', ') || 'none']].map(x => `<div><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
+  $('system-details').innerHTML = [['Stripe', s.stripe_mode], ['Poll interval', `${s.poll_interval_seconds}s`], ['Growth cadence', s.growth_enabled ? `every ${s.growth_interval_hours}h` : 'off'], ['Daily growth calls', s.growth_max_calls_per_day], ['Models', `${s.model_routing.worker} → ${s.model_routing.planner} → ${s.model_routing.qa}`], ['Checkout', st.checkout_link_ready ? 'ready' : 'missing'], ['Operational gaps', (s.missing_operational_config || []).join(', ') || 'none']].map(x => `<div><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
   $('decisions').innerHTML = data.decisions.length ? data.decisions.map(decisionCard).join('') : '<p class="empty">No decisions waiting for review.</p>';
   $('audit').innerHTML = data.audit.length ? data.audit.map(auditItem).join('') : '<p class="empty">No audit events yet.</p>';
   $('messages').innerHTML = data.messages.length ? data.messages.map(messageItem).join('') : '<p class="empty">No messages recorded.</p>';

@@ -100,11 +100,14 @@ class RevenueWorker:
             LOG.warning("Checkout provisioning failed: %s", exc)
             return False
 
-    def _complete(self, system: str, user: str, max_tokens: int) -> str:
+    def _complete(self, system: str, user: str, max_tokens: int, role: str = "worker") -> str:
         if self.llm_calls >= self.settings.max_llm_calls_per_cycle:
             raise ProviderError("per-cycle LLM budget reached")
         self.llm_calls += 1
-        return self.llm.complete(system, user, max_tokens=max_tokens)
+        self.store.audit("llm_call", {"role": role, "model": self.settings.model_for(role), "max_tokens": max_tokens})
+        if role == "worker":
+            return self.llm.complete(system, user, max_tokens=max_tokens)
+        return self.llm.complete(system, user, max_tokens=max_tokens, role=role)
 
     def _business_context(self) -> str:
         return "\n".join([

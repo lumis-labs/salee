@@ -18,6 +18,7 @@ from quality_control import validate_draft
 from store import Store
 
 GROWTH_PROMPT = """You are Salee Arman's growth strategist. Improve conversion for the configured B2B AI workflow service using only the supplied evidence. Return strict JSON with keys: headline, subheadline, faq (array of {question, answer}), blog_title, blog_slug, blog_body, seo_description, geo_summary, experiment_name, experiment_hypothesis, experiment_variant. Keep claims specific and honest; no guaranteed outcomes, fake testimonials, invented case studies, or unsupported statistics. The blog must be useful, original, and under 900 words. The experiment may change positioning or packaging but must not silently change price or payment behavior."""
+GROWTH_QA_PROMPT = """You are Salee Arman's final quality reviewer. Review the proposed landing copy and blog for factual support, clarity, conversion value, SEO/GEO usefulness, and policy safety. Return strict JSON only: {\"approved\": true or false, \"issues\": [short strings]}. Reject unsupported guarantees, fake proof, invented statistics, manipulative urgency, or missing customer value. Approve useful, specific copy."""
 
 
 def _slug(value: str) -> str:
@@ -78,7 +79,7 @@ class GrowthEngine:
             return {"status": "not_due"}
         self.store.set_runtime("growth_last_attempt", datetime.now(timezone.utc).isoformat())
         try:
-            raw = self.complete(GROWTH_PROMPT, self.context(), max_tokens=1600)
+            raw = self.complete(GROWTH_PROMPT, self.context(), max_tokens=1600, role="planner")
             proposal = _parse_proposal(raw)
         except Exception as exc:
             self.store.audit("growth_error", {"error": str(exc)})
@@ -94,6 +95,19 @@ class GrowthEngine:
         if errors:
             self.store.audit("growth_quality_blocked", {"errors": errors})
             return {"status": "blocked", "errors": errors}
+
+        if self.settings.openrouter_qa_enabled:
+            qa_input = json.dumps({key: proposal.get(key) for key in required}, ensure_ascii=False)
+            try:
+                qa_raw = self.complete(GROWTH_QA_PROMPT, qa_input, max_tokens=500, role="qa")
+                qa = _parse_proposal(qa_raw)
+            except Exception as exc:
+                self.store.audit("growth_qa_error", {"error": str(exc)})
+                return {"status": "qa_error", "error": str(exc)}
+            if qa.get("approved") is not True:
+                issues = qa.get("issues") if isinstance(qa.get("issues"), list) else ["QA reviewer did not approve the proposal"]
+                self.store.audit("growth_qa_blocked", {"issues": issues[:8]})
+                return {"status": "qa_blocked", "errors": issues[:8]}
 
         faq = proposal["faq"] if isinstance(proposal["faq"], list) else []
         self.store.set_runtime("landing_headline", str(proposal["headline"])[:180])

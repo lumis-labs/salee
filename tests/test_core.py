@@ -133,6 +133,17 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(self.store.contact("buyer@example.com")["consent"], "opted_in")
         self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM messages WHERE direction='inbound'").fetchone()[0], 1)
 
+    def test_model_roles_route_to_cheap_worker_and_strong_planner(self):
+        settings = replace(
+            self.settings,
+            openrouter_worker_model="openrouter/free",
+            openrouter_planner_model="openai/gpt-5.4",
+            openrouter_qa_model="openai/gpt-5.4",
+        )
+        self.assertEqual(settings.model_for("worker"), "openrouter/free")
+        self.assertEqual(settings.model_for("planner"), "openai/gpt-5.4")
+        self.assertEqual(settings.model_for("qa"), "openai/gpt-5.4")
+
     def test_paid_order_gets_intake_and_automated_report(self):
         worker = RevenueWorker(self.settings, self.store)
         sent = []
