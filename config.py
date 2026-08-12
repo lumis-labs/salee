@@ -75,6 +75,8 @@ class Settings:
             return value
 
         db = Path(s("DATABASE_PATH", "data/revenue_agent.sqlite3"))
+        if os.getenv("VERCEL") and not os.getenv("DATABASE_PATH"):
+            db = Path("/tmp/salee-revenue-agent.sqlite3")
         if not db.is_absolute():
             db = root / db
         return cls(
