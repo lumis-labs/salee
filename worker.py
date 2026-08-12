@@ -50,7 +50,13 @@ class RevenueWorker:
 
     @property
     def payment_mode(self) -> str:
-        return self.store.get_runtime("checkout_mode") or ("manual" if self.settings.checkout_url else self.settings.stripe_mode)
+        configured = self.store.get_runtime("checkout_mode")
+        if configured:
+            return configured
+        checkout = self.checkout_url
+        if "buy.stripe.com/test_" in checkout or "test_" in checkout:
+            return "test"
+        return "manual" if self.settings.checkout_url else self.settings.stripe_mode
 
     @property
     def missing_revenue_config(self) -> list[str]:

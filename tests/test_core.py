@@ -103,6 +103,12 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(worker.revenue_ready)
         self.assertEqual(worker.checkout_url, "https://buy.stripe.test/salee")
 
+    def test_legacy_test_checkout_is_not_treated_as_live(self):
+        settings = replace(self.settings, stripe_restricted_key="rk_live_placeholder")
+        self.store.set_runtime("checkout_url", "https://buy.stripe.com/test_legacy")
+        worker = RevenueWorker(settings, self.store)
+        self.assertEqual(worker.payment_mode, "test")
+
     def test_paid_order_gets_intake_and_automated_report(self):
         worker = RevenueWorker(self.settings, self.store)
         sent = []
