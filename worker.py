@@ -318,7 +318,9 @@ class RevenueWorker:
             sender = str(raw.get("from", ""))
             if not sender or sender == self.settings.agentmail_inbox:
                 continue
-            sender_local = sender.split("@", 1)[0].lower()
+            sender_match = re.search(r"[\w.+-]+@[\w.-]+", sender)
+            sender_address = sender_match.group(0) if sender_match else sender
+            sender_local = sender_address.split("@", 1)[0].lower()
             if sender_local in {"noreply", "no-reply", "donotreply", "do-not-reply"}:
                 self.store.audit("inbound_ignored", {"contact": sender, "reason": "no-reply sender"})
                 continue
