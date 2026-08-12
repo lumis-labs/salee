@@ -12,7 +12,7 @@ from worker import RevenueWorker
 from main import Handler as RuntimeHandler
 
 
-class VercelHandler(BaseHTTPRequestHandler):
+class handler(BaseHTTPRequestHandler):
     worker = RevenueWorker(load_settings("."), Store(load_settings(".").database_path))
     settings = worker.settings
 
@@ -31,6 +31,3 @@ class VercelHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         return
-
-
-handler = VercelHandler
