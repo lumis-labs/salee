@@ -8,12 +8,13 @@ import hmac
 import html
 import json
 import logging
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from config import load_settings
-from store import Store
+from store import build_store
 from worker import RevenueWorker
 from providers import ProviderError, StripePayments
 
@@ -102,6 +103,8 @@ class Handler(BaseHTTPRequestHandler):
                     session_id = session.get("id")
                     if email and session_id:
                         self.worker.register_payment(str(session_id), str(email), int(session.get("amount_total") or 0))
+                        if os.getenv("VERCEL"):
+                            self.worker.process_orders()
                 self._send(200, {"received": True})
             except (ProviderError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 logging.getLogger("payments").warning("Stripe webhook rejected: %s", exc)
@@ -112,6 +115,8 @@ class Handler(BaseHTTPRequestHandler):
             token = params.get("token", [""])[0]
             intake = {key: values[0] for key, values in params.items() if key != "token" and values}
             if self.worker.submit_intake(token, intake):
+                if os.getenv("VERCEL"):
+                    self.worker.process_orders()
                 self._send_html(200, "<h1>Received</h1><p>Salee will email your workflow report.</p>")
             else:
                 self._send_html(400, "<h1>Could not save intake</h1><p>Please check the link and required fields.</p>")
@@ -144,7 +149,7 @@ def serve(worker: RevenueWorker, host: str = "0.0.0.0", port: int = 8080) -> Non
 def main() -> None:
     settings = load_settings()
     logging.basicConfig(level=getattr(logging, "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    store = Store(settings.database_path)
+    store = build_store(settings)
     worker = RevenueWorker(settings, store)
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "worker":

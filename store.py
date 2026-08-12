@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import hmac
+import os
 import secrets
 import sqlite3
 from datetime import datetime, timezone
@@ -284,3 +288,90 @@ class Store:
             "last_audit": self.db.execute("SELECT created_at FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()[0]
             if self.db.execute("SELECT 1 FROM audit_log LIMIT 1").fetchone() else None,
         }
+
+
+class VercelStore(Store):
+    """Ephemeral SQLite plus signed order tokens for serverless invocations.
+
+    Vercel's filesystem is not durable between invocations. Orders therefore
+    carry their signed checkout identity in the intake token, allowing a cold
+    invocation to reconstruct the minimum order record and complete fulfillment.
+    The always-on worker continues to use regular durable SQLite.
+    """
+
+    def __init__(self, path: Path, signing_key: str):
+        self.signing_key = signing_key.encode()
+        super().__init__(path)
+
+    def _token(self, session_id: str, email: str, amount_total: int) -> str:
+        payload = json.dumps(
+            {"session_id": session_id, "email": email, "amount_total": amount_total},
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+        signature = hmac.new(self.signing_key, encoded.encode(), hashlib.sha256).hexdigest()
+        return f"v1.{encoded}.{signature}"
+
+    def _decode(self, token: str) -> dict[str, Any] | None:
+        try:
+            version, encoded, signature = token.split(".", 2)
+            expected = hmac.new(self.signing_key, encoded.encode(), hashlib.sha256).hexdigest()
+            if version != "v1" or not hmac.compare_digest(signature, expected):
+                return None
+            raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+            payload = json.loads(raw.decode())
+            if not all(payload.get(key) for key in ("session_id", "email")):
+                return None
+            return payload
+        except (ValueError, TypeError, json.JSONDecodeError):
+            return None
+
+    def register_order(self, stripe_session_id: str, email: str, amount_total: int) -> sqlite3.Row:
+        existing = self.db.execute("SELECT * FROM orders WHERE stripe_session_id=?", (stripe_session_id,)).fetchone()
+        if existing:
+            return existing
+        now = utcnow()
+        self.db.execute(
+            "INSERT INTO orders(stripe_session_id,email,amount_total,intake_token,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+            (stripe_session_id, email, amount_total, self._token(stripe_session_id, email, amount_total), now, now),
+        )
+        self.db.commit()
+        return self.db.execute("SELECT * FROM orders WHERE stripe_session_id=?", (stripe_session_id,)).fetchone()
+
+    def order_by_token(self, token: str) -> sqlite3.Row | dict[str, Any] | None:
+        row = super().order_by_token(token)
+        if row:
+            return row
+        payload = self._decode(token)
+        if not payload:
+            return None
+        now = utcnow()
+        return {
+            "stripe_session_id": payload["session_id"],
+            "email": payload["email"],
+            "amount_total": int(payload.get("amount_total") or 0),
+            "intake_token": token,
+            "intake_json": None,
+            "intake_sent_at": None,
+            "status": "paid",
+            "fulfillment_status": "awaiting_intake",
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def save_intake(self, token: str, intake: dict[str, str]) -> bool:
+        if not super().order_by_token(token):
+            payload = self._decode(token)
+            if not payload:
+                return False
+            self.register_order(payload["session_id"], payload["email"], int(payload.get("amount_total") or 0))
+        return super().save_intake(token, intake)
+
+
+def build_store(settings: Any) -> Store:
+    if os.getenv("VERCEL"):
+        key = getattr(settings, "stripe_webhook_secret", "") or getattr(settings, "stripe_restricted_key", "")
+        if key:
+            return VercelStore(settings.database_path, key)
+    return Store(settings.database_path)

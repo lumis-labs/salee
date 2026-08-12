@@ -7,13 +7,14 @@ Stripe and customers a public HTTPS endpoint for landing, intake, and webhooks.
 from http.server import BaseHTTPRequestHandler
 
 from config import load_settings
-from store import Store
+from store import build_store
 from worker import RevenueWorker
 from main import Handler as RuntimeHandler
 
 
 class handler(BaseHTTPRequestHandler):
-    worker = RevenueWorker(load_settings("."), Store(load_settings(".").database_path))
+    _settings = load_settings(".")
+    worker = RevenueWorker(_settings, build_store(_settings))
     settings = worker.settings
 
     def _delegate(self):

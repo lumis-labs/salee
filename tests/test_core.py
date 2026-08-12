@@ -9,7 +9,7 @@ from pathlib import Path
 
 from config import load_settings
 from policy import can_send, note_inbound
-from store import Store
+from store import Store, VercelStore
 from worker import RevenueWorker
 from providers import StripePayments
 from growth import _parse_proposal
@@ -108,6 +108,17 @@ class CoreTests(unittest.TestCase):
         self.store.set_runtime("checkout_url", "https://buy.stripe.com/test_legacy")
         worker = RevenueWorker(settings, self.store)
         self.assertEqual(worker.payment_mode, "test")
+
+    def test_vercel_order_token_survives_cold_invocation(self):
+        first = VercelStore(self.root / "first.sqlite3", "webhook-secret")
+        order = first.register_order("cs_live_1", "buyer@example.com", 150000)
+        token = order["intake_token"]
+        first.close()
+        second = VercelStore(self.root / "second.sqlite3", "webhook-secret")
+        reconstructed = second.order_by_token(token)
+        self.assertEqual(reconstructed["stripe_session_id"], "cs_live_1")
+        self.assertTrue(second.save_intake(token, {"business": "Acme", "goal": "more leads"}))
+        second.close()
 
     def test_paid_order_gets_intake_and_automated_report(self):
         worker = RevenueWorker(self.settings, self.store)
