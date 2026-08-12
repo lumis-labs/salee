@@ -127,6 +127,12 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(is_authenticated(settings, f"salee_dashboard_session={cookie}"))
         self.assertFalse(is_authenticated(settings, "salee_dashboard_session=not-valid"))
 
+    def test_website_interest_captures_consent_and_goal(self):
+        worker = RevenueWorker(replace(self.settings, checkout_url="https://buy.example/salee"), self.store)
+        self.assertTrue(worker.capture_interest("buyer@example.com", "Acme", "more qualified leads"))
+        self.assertEqual(self.store.contact("buyer@example.com")["consent"], "opted_in")
+        self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM messages WHERE direction='inbound'").fetchone()[0], 1)
+
     def test_paid_order_gets_intake_and_automated_report(self):
         worker = RevenueWorker(self.settings, self.store)
         sent = []

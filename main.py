@@ -83,12 +83,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_html(200, f"<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><meta name=description content='{html.escape(json.loads(row['metadata_json']).get('seo_description',''), quote=True)}'><title>{html.escape(row['title'])}</title><article style='font:16px system-ui;max-width:760px;margin:8vh auto;padding:24px;white-space:pre-wrap'><p><a href='/'>Salee Arman</a></p><h1>{html.escape(row['title'])}</h1><div>{html.escape(row['body'])}</div></article>")
         elif parsed.path == "/robots.txt":
             origin = self.settings.public_base_url or "http://localhost:8080"
-            self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers(); self.wfile.write(f"User-agent: *\nAllow: /\nSitemap: {origin}/sitemap.xml\n".encode())
+            self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers(); self.wfile.write(f"User-agent: *\nAllow: /\nDisallow: /dashboard\nDisallow: /webhooks/\nSitemap: {origin}/sitemap.xml\n".encode())
         elif parsed.path == "/sitemap.xml":
             origin = self.settings.public_base_url or "http://localhost:8080"
             urls = [f"{origin}/", f"{origin}/blog"] + [f"{origin}/blog/{row['slug']}" for row in self.worker.store.artifacts("blog", limit=100)]
             xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">" + "".join(f"<url><loc>{html.escape(url)}</loc></url>" for url in urls) + "</urlset>"
             self.send_response(200); self.send_header("Content-Type", "application/xml"); self.end_headers(); self.wfile.write(xml.encode())
+        elif parsed.path == "/llms.txt":
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers(); self.wfile.write((f"# {self.settings.agent_full_name}\n\n{self.settings.business_description}\n\nOffer: {self.settings.offer_name}\nPrice: ${self.settings.offer_price_cents / 100:,.0f}\nWhat customers receive: a focused AI workflow audit, prioritized opportunities, a 14-day implementation plan, and suggested success metrics.\nCheckout: {self.worker.checkout_url}\n" ).encode())
         elif parsed.path == "/intake":
             token = parse_qs(parsed.query).get("token", [""])[0]
             order = self.worker.store.order_by_token(token)
@@ -132,6 +134,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/dashboard", {"Set-Cookie": cookie, "Cache-Control": "no-store"})
             else:
                 self._send_html(401, login_page("Incorrect dashboard password."), {"Cache-Control": "no-store"})
+            return
+        if parsed.path == "/interest":
+            params = parse_qs(raw.decode(errors="replace"), keep_blank_values=True)
+            email = params.get("email", [""])[0]
+            business = params.get("business", [""])[0]
+            goal = params.get("goal", [""])[0]
+            consent = params.get("consent", [""])[0]
+            if consent and self.worker.capture_interest(email, business, goal):
+                self._send_html(200, "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Thanks · Salee Arman</title><style>body{font:16px system-ui;max-width:680px;margin:12vh auto;padding:24px;color:#17202a}a{color:#111}</style><h1>Thanks — Salee received your goal.</h1><p>Check your inbox for a useful next step. You can also <a href='/'>return to the offer</a>.</p>")
+            else:
+                self._send_html(400, "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Missing details · Salee</title><style>body{font:16px system-ui;max-width:680px;margin:12vh auto;padding:24px;color:#17202a}</style><h1>One more detail is needed.</h1><p>Please provide a valid email, business, goal, and contact permission.</p><p><a href='/'>Return to Salee</a></p>")
             return
         if parsed.path == "/webhooks/stripe":
             try:

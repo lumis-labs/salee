@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -130,6 +132,40 @@ class RevenueWorker:
         if saved:
             self.store.audit("intake_received", {"fields": sorted(cleaned)})
         return saved
+
+    def capture_interest(self, email: str, business: str, goal: str) -> bool:
+        """Capture an explicit website inquiry and send one useful reply."""
+        email = email.strip().lower()[:320]
+        business = business.strip()[:500]
+        goal = goal.strip()[:1200]
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or not business or not goal:
+            return False
+        event_id = "interest-" + hashlib.sha256(f"{email}|{business}|{goal}".encode()).hexdigest()[:32]
+        self.store.upsert_contact(email, "email", "opted_in")
+        if not self.store.record_message(event_id, "email", "inbound", email, f"Business: {business}\nGoal: {goal}"):
+            return True
+        self.store.audit("interest_captured", {"contact": email, "business": business, "goal": goal})
+        if not self.settings.agentmail_api_key:
+            return True
+        body = (
+            f"Thanks for sharing what you are working on at {business}.\n\n"
+            f"Salee will use your goal — {goal} — to frame the fastest practical AI workflow opportunities.\n\n"
+            f"If you want the complete implementation plan, you can start here: {self.checkout_url}\n\n"
+            "You can reply to this email with more context or STOP to opt out."
+        )
+        decision = can_send(self.store, self.settings, email, "email", is_reply=True)
+        if not decision.allowed:
+            self.store.audit("interest_response_blocked", {"contact": email, "reason": decision.reason})
+            return True
+        try:
+            result = self.mail.send(email, f"Your AI workflow goal for {self.settings.business_name}", body)
+            external_id = result.get("message_id") or result.get("sid") or f"interest-reply-{time.time_ns()}"
+            self.store.record_message(str(external_id), "email", "outbound", email, body)
+            self.store.audit("interest_response_sent", {"contact": email, "provider_id": external_id})
+        except ProviderError as exc:
+            self.store.audit("interest_response_error", {"contact": email, "error": str(exc)})
+            LOG.warning("Interest response failed: %s", exc)
+        return True
 
     def _intake_url(self, token: str) -> str:
         origin = self.settings.public_base_url or "http://localhost:8080"

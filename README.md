@@ -13,7 +13,7 @@ python -m unittest discover -s tests -v
 python main.py
 ```
 
-The HTTP server exposes `/`, `GET /health`, `GET /metrics`, and a signed `POST /webhooks/twilio`. The server also starts the 24/7 poller by default. For a worker-only process, run `python main.py worker`.
+The HTTP server exposes `/`, `POST /interest` for explicit website inquiries, `/blog`, `/llms.txt`, `GET /health`, `GET /metrics`, the password-protected `/dashboard`, and signed webhook routes. The server also starts the 24/7 poller by default. For a worker-only process, run `python main.py worker`.
 
 For a restartable always-on deployment:
 
@@ -42,4 +42,4 @@ Use a hosted payment link in `CHECKOUT_URL` initially. The agent never receives 
 
 The runtime uses a deterministic router plus one bounded OpenRouter specialist call per supported conversation: support reply or sales/offer reply. SQLite makes retries and duplicate webhooks safe, while `audit_log` records every poll, decision, send, and provider error. Quality control is local and does not consume model credits.
 
-Growth capabilities are documented in [docs/autonomous_growth_capabilities.md](docs/autonomous_growth_capabilities.md). Salee runs the growth specialist every six hours by default, publishing landing copy, FAQ/SEO/GEO metadata, and blog artifacts while recording offer pivots as experiments.
+Growth capabilities are documented in [docs/autonomous_growth_capabilities.md](docs/autonomous_growth_capabilities.md). Salee runs the growth specialist every six hours by default, publishing landing copy, FAQ/SEO/GEO metadata, and blog artifacts while recording offer pivots as experiments. The landing page also captures explicit visitor interest and sends one useful reply when AgentMail is configured.
