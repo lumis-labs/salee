@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from config import Settings
 from quality_control import validate_draft
+from shared_growth import SharedGrowth
 from store import Store
 
 GROWTH_PROMPT = """You are Salee Arman's growth strategist. Improve conversion for the configured B2B AI workflow service using only the supplied evidence. Return strict JSON with keys: headline, subheadline, faq (array of {question, answer}), blog_title, blog_slug, blog_body, seo_description, geo_summary, experiment_name, experiment_hypothesis, experiment_variant. Keep claims specific and honest; no guaranteed outcomes, fake testimonials, invented case studies, or unsupported statistics. The blog must be useful, original, and under 900 words. The experiment may change positioning or packaging but must not silently change price or payment behavior."""
@@ -49,11 +50,37 @@ class GrowthEngine:
         self.settings = settings
         self.store = store
         self.complete = complete
+        self.shared = SharedGrowth(settings)
+
+    def _get_runtime(self, key: str) -> str | None:
+        local = self.store.get_runtime(key)
+        if local:
+            return local
+        if self.shared.enabled:
+            return self.shared.get_runtime(key)
+        return None
+
+    def _set_runtime(self, key: str, value: str) -> None:
+        self.store.set_runtime(key, value)
+        if self.shared.enabled:
+            self.shared.set_runtime(key, value)
+
+    def artifacts(self, kind: str | None = None, limit: int = 20) -> list[Any]:
+        local = self.store.artifacts(kind, limit)
+        if local:
+            return local
+        return self.shared.artifacts(kind, limit) if self.shared.enabled else local
+
+    def artifact(self, slug: str) -> Any:
+        local = self.store.artifact(slug)
+        if local:
+            return local
+        return self.shared.artifact(slug) if self.shared.enabled else None
 
     def due(self) -> bool:
         if not self.settings.growth_enabled:
             return False
-        last = self.store.get_runtime("growth_last_run") or self.store.get_runtime("growth_last_attempt")
+        last = self._get_runtime("growth_last_run") or self._get_runtime("growth_last_attempt")
         if not last:
             return True
         try:
@@ -63,7 +90,7 @@ class GrowthEngine:
 
     def context(self) -> str:
         status = self.store.status()
-        existing = [f"{row['kind']}: {row['title']}" for row in self.store.artifacts(limit=8)]
+        existing = [f"{row['kind']}: {row['title']}" for row in self.artifacts(limit=8)]
         return json.dumps({
             "agent": self.settings.agent_full_name,
             "business": self.settings.business_description,
@@ -77,7 +104,7 @@ class GrowthEngine:
     def run(self) -> dict[str, Any]:
         if not self.due():
             return {"status": "not_due"}
-        self.store.set_runtime("growth_last_attempt", datetime.now(timezone.utc).isoformat())
+        self._set_runtime("growth_last_attempt", datetime.now(timezone.utc).isoformat())
         try:
             raw = self.complete(GROWTH_PROMPT, self.context(), max_tokens=1600, role="planner")
             proposal = _parse_proposal(raw)
@@ -110,24 +137,27 @@ class GrowthEngine:
                 return {"status": "qa_blocked", "errors": issues[:8]}
 
         faq = proposal["faq"] if isinstance(proposal["faq"], list) else []
-        self.store.set_runtime("landing_headline", str(proposal["headline"])[:180])
-        self.store.set_runtime("landing_subheadline", str(proposal["subheadline"])[:400])
-        self.store.set_runtime("seo_description", str(proposal["seo_description"])[:300])
-        self.store.set_runtime("geo_summary", str(proposal["geo_summary"])[:1000])
-        self.store.set_runtime("faq_json", json.dumps(faq[:8]))
+        self._set_runtime("landing_headline", str(proposal["headline"])[:180])
+        self._set_runtime("landing_subheadline", str(proposal["subheadline"])[:400])
+        self._set_runtime("seo_description", str(proposal["seo_description"])[:300])
+        self._set_runtime("geo_summary", str(proposal["geo_summary"])[:1000])
+        self._set_runtime("faq_json", json.dumps(faq[:8]))
         blog_slug = _slug(str(proposal.get("blog_slug") or proposal["blog_title"]))
-        self.store.save_artifact("blog", blog_slug, str(proposal["blog_title"])[:180], str(proposal["blog_body"])[:12000], {"seo_description": proposal["seo_description"]})
+        metadata = {"seo_description": proposal["seo_description"]}
+        self.store.save_artifact("blog", blog_slug, str(proposal["blog_title"])[:180], str(proposal["blog_body"])[:12000], metadata)
+        if self.shared.enabled:
+            self.shared.save_artifact("blog", blog_slug, str(proposal["blog_title"])[:180], str(proposal["blog_body"])[:12000], metadata)
         if proposal.get("experiment_name") and proposal.get("experiment_hypothesis"):
             self.store.save_experiment(str(proposal["experiment_name"])[:180], str(proposal["experiment_hypothesis"])[:500], {"variant": proposal.get("experiment_variant", "")})
-        self.store.set_runtime("growth_last_run", datetime.now(timezone.utc).isoformat())
+        self._set_runtime("growth_last_run", datetime.now(timezone.utc).isoformat())
         self.store.audit("growth_published", {"blog_slug": blog_slug, "faq_count": len(faq), "experiment": bool(proposal.get("experiment_name"))})
         return {"status": "published", "blog_slug": blog_slug, "faq_count": len(faq)}
 
     def landing_page(self, checkout_url: str) -> str:
-        headline = self.store.get_runtime("landing_headline") or "Find the AI workflow that can move revenue first."
-        subheadline = self.store.get_runtime("landing_subheadline") or "Salee Arman maps your current lead, follow-up, and conversion process into a focused implementation plan—so you know what to automate first, what to measure, and what to leave alone."
-        description = self.store.get_runtime("seo_description") or self.settings.business_description
-        faq = json.loads(self.store.get_runtime("faq_json") or "[]")
+        headline = self._get_runtime("landing_headline") or "Find the AI workflow that can move revenue first."
+        subheadline = self._get_runtime("landing_subheadline") or "Salee Arman maps your current lead, follow-up, and conversion process into a focused implementation plan—so you know what to automate first, what to measure, and what to leave alone."
+        description = self._get_runtime("seo_description") or self.settings.business_description
+        faq = json.loads(self._get_runtime("faq_json") or "[]")
         if not faq:
             faq = [
                 {"question": "What do I receive?", "answer": "A practical workflow audit, three prioritized opportunities, a 14-day implementation plan, and suggested success metrics."},

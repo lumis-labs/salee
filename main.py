@@ -71,12 +71,12 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/dashboard/logout":
             self._redirect("/dashboard", {"Set-Cookie": f"{COOKIE_NAME}=; Max-Age=0; HttpOnly; Path=/dashboard; SameSite=Strict"})
         elif parsed.path == "/blog":
-            posts = self.worker.store.artifacts("blog", limit=20)
+            posts = self.worker.growth.artifacts("blog", limit=20)
             links = "".join(f'<li><a href="/blog/{html.escape(row["slug"], quote=True)}">{html.escape(row["title"])}</a></li>' for row in posts)
             self._send_html(200, f"<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><title>Salee insights</title><h1>Salee insights</h1><ul>{links or '<li>New insights are being prepared.</li>'}</ul>")
         elif parsed.path.startswith("/blog/"):
             slug = parsed.path.removeprefix("/blog/")
-            row = self.worker.store.artifact(slug)
+            row = self.worker.growth.artifact(slug)
             if not row:
                 self._send_html(404, "<h1>Not found</h1>")
             else:
