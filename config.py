@@ -68,6 +68,10 @@ class Settings:
     prospecting_source_urls: str
     supabase_data_api_url: str
     supabase_secret_key: str
+    competitive_analysis_enabled: bool
+    competitive_analysis_interval_hours: int
+    competitive_analysis_urls: str
+    autonomous_review_interval_minutes: int
 
     @classmethod
     def from_root(cls, root: Path) -> "Settings":
@@ -138,6 +142,10 @@ class Settings:
             prospecting_source_urls=s("PROSPECTING_SOURCE_URLS"),
             supabase_data_api_url=url("SUPABASE_DATA_API_URL"),
             supabase_secret_key=s("SUPABASE_SECRET_KEY"),
+            competitive_analysis_enabled=s("COMPETITIVE_ANALYSIS_ENABLED", "true").lower() in {"1", "true", "yes"},
+            competitive_analysis_interval_hours=max(6, i("COMPETITIVE_ANALYSIS_INTERVAL_HOURS", 12)),
+            competitive_analysis_urls=s("COMPETITIVE_ANALYSIS_URLS", "https://zapier.com/ai,https://www.hubspot.com/artificial-intelligence,https://www.salesforce.com/ai/,https://www.bcg.com/capabilities/artificial-intelligence"),
+            autonomous_review_interval_minutes=max(5, i("AUTONOMOUS_REVIEW_INTERVAL_MINUTES", 10)),
         )
 
     @property

@@ -16,6 +16,7 @@ from prospecting import ProspectingEngine
 from policy import can_send, note_inbound
 from providers import AgentMail, InboundMessage, OpenRouter, ProviderError, StripePayments, Twilio
 from quality_control import validate_draft
+from research import CompetitiveResearch
 from shared_prospects import SharedProspects
 from store import Store
 
@@ -48,6 +49,7 @@ class RevenueWorker:
         self.llm_calls = 0
         self.shared_prospects = SharedProspects(settings)
         self.growth = GrowthEngine(settings, self.store, self._complete)
+        self.research = CompetitiveResearch(settings, self.store, self.growth.shared)
         self.prospecting = ProspectingEngine(settings, self.store, self.shared_prospects)
 
     def observed_status(self) -> dict[str, Any]:
@@ -58,6 +60,32 @@ class RevenueWorker:
             except Exception as exc:
                 self.store.audit("shared_prospect_status_error", {"error": str(exc)[:300]})
         return status
+
+    def autonomous_review(self) -> dict[str, Any]:
+        """Keep the coordinator active between customer events and scheduled work."""
+        now = datetime.now(timezone.utc)
+        last = self.store.get_runtime("autonomous_last_review")
+        if last:
+            try:
+                if now - datetime.fromisoformat(last) < timedelta(minutes=self.settings.autonomous_review_interval_minutes):
+                    return {"status": "not_due"}
+            except ValueError:
+                pass
+        page = self.growth.landing_page(self.checkout_url)
+        checks = {
+            "title": "<title>" in page,
+            "description": 'name="description"' in page,
+            "structured_data": 'application/ld+json' in page,
+            "blog_path": 'href="/blog"' in page,
+            "lead_capture": 'action="/interest"' in page,
+            "checkout": bool(self.checkout_url) and self.checkout_url in page,
+        }
+        issues = [name for name, passed in checks.items() if not passed]
+        next_action = "run growth strategist" if issues or self.growth.due() else "research public positioning and prospecting freshness"
+        self.store.set_runtime("autonomous_last_review", now.isoformat())
+        self.store.set_runtime("autonomous_next_action", next_action)
+        self.store.audit("autonomous_review", {"checks": checks, "issues": issues, "next_action": next_action})
+        return {"status": "completed", "issues": issues, "next_action": next_action}
 
     @property
     def checkout_url(self) -> str:
@@ -371,10 +399,12 @@ class RevenueWorker:
         processed += self.process_queued()
         processed += self.process_orders()
         processed += self.run_followups()
+        research_result = self.research.run()
         growth_result = self.growth.run()
         prospecting_result = self.prospecting.run()
+        autonomous_result = self.autonomous_review()
         self.store.audit("cycle_complete", {"processed": processed, "status": self.store.status()})
-        return {"processed": processed, "growth": growth_result, "prospecting": prospecting_result, **self.observed_status()}
+        return {"processed": processed, "growth": growth_result, "research": research_result, "prospecting": prospecting_result, "autonomous": autonomous_result, **self.observed_status()}
 
     def run_forever(self) -> None:
         LOG.info("Revenue worker started; interval=%ss", self.settings.poll_interval_seconds)

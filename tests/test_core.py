@@ -182,6 +182,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(prospect["status"], "draft")
         self.assertIn("https://salee.example", prospect["outreach_draft"])
 
+    def test_autonomous_review_checks_landing_surface(self):
+        worker = RevenueWorker(replace(self.settings, checkout_url="https://buy.example/salee"), self.store)
+        result = worker.autonomous_review()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["issues"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
